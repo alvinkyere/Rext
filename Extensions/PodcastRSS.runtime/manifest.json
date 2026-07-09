@@ -1,0 +1,24 @@
+{
+  "id": "com.runtime.podcast-rss",
+  "displayName": "Podcast RSS",
+  "version": "1.0.0",
+  "sdkVersion": "1.0.0",
+  "minimumRuntimeVersion": "1.0.0",
+  "author": "Runtime Official",
+  "description": "Golden-reference extension for browsing and streaming podcasts from an RSS-backed API.",
+  "website": "https://example.com/podcast-rss",
+  "repository": "https://example.com/repo",
+  "category": "media",
+  "icon": "icon.png",
+  "entryPoint": "main.js",
+  "permissions": {
+    "network": {
+      "domains": ["api.example-podcasts.com"],
+      "allowUserConfiguredHost": false
+    },
+    "storage": {
+      "maxBytes": 65536
+    }
+  },
+  "capabilities": ["search", "details", "streams"]
+}
