@@ -70,6 +70,10 @@ final class LibraryItem {
     var addedAt: Date
     /// Normalized canonical genres, captured at save time for grouping/recommendations.
     var genres: [String] = []
+    /// Reference to the canonical node in the Universal Content Graph (Phase 3).
+    var contentID: String = ""
+    /// Owning user profile (Phase 6). Defaults to the default profile so pre-Phase-6 rows are retained.
+    var profileID: String = UserProfile.defaultProfileID
 
     init(
         extensionID: String,
@@ -80,9 +84,12 @@ final class LibraryItem {
         kind: String,
         collection: LibraryCollection,
         genres: [String] = [],
+        profileID: String = UserProfile.defaultProfileID,
         addedAt: Date = .now
     ) {
-        self.key = "\(extensionID)|\(itemID)|\(collection.rawValue)"
+        self.key = "\(profileID)|\(extensionID)|\(itemID)|\(collection.rawValue)"
+        self.contentID = "\(extensionID)|\(itemID)"
+        self.profileID = profileID
         self.extensionID = extensionID
         self.itemID = itemID
         self.title = title
@@ -110,6 +117,10 @@ final class HistoryEntry {
     var lastAccessed: Date
     var positionSeconds: Double
     var durationSeconds: Double
+    /// Reference to the canonical node in the Universal Content Graph (Phase 3).
+    var contentID: String = ""
+    /// Owning user profile (Phase 6).
+    var profileID: String = UserProfile.defaultProfileID
 
     init(
         extensionID: String,
@@ -117,11 +128,14 @@ final class HistoryEntry {
         title: String,
         kind: String,
         artworkURL: String? = nil,
+        profileID: String = UserProfile.defaultProfileID,
         lastAccessed: Date = .now,
         positionSeconds: Double = 0,
         durationSeconds: Double = 0
     ) {
-        self.key = "\(extensionID)|\(itemID)"
+        self.key = "\(profileID)|\(extensionID)|\(itemID)"
+        self.contentID = "\(extensionID)|\(itemID)"
+        self.profileID = profileID
         self.extensionID = extensionID
         self.itemID = itemID
         self.title = title

@@ -17,7 +17,14 @@ struct MediaDetailView: View {
     @State private var error: ConnectorError?
     @State private var selectedItem: CatalogItem?
     @State private var showingStreams: Bool = false
+    @State private var related: [RelatedItem] = []
+    @State private var playingYouTube: PlayableYouTube?
     @Environment(\.modelContext) private var context
+
+    /// Identifiable wrapper so a YouTube video id can drive a fullScreenCover.
+    private struct PlayableYouTube: Identifiable { let id: String }
+
+    private var isYouTube: Bool { connectorId == YouTubeProvider.providerID }
     
     var body: some View {
         ScrollView {
@@ -36,7 +43,9 @@ struct MediaDetailView: View {
             ToolbarItem(placement: .topBarTrailing) { saveMenu }
         }
         .task {
+            recordView()
             await loadDetails()
+            related = RelatedContentService(context: context).related(to: item, extensionID: connectorId)
         }
         .sheet(isPresented: $showingStreams) {
             if let selectedItem = selectedItem {
@@ -46,6 +55,13 @@ struct MediaDetailView: View {
                     title: selectedItem.title
                 )
             }
+        }
+        .fullScreenCover(item: $playingYouTube) { _ in
+            #if canImport(WebKit) && canImport(UIKit)
+            RextVideoPlayerView(item: item, extensionID: connectorId, title: item.title)
+            #else
+            EmptyView()
+            #endif
         }
     }
     
@@ -104,11 +120,15 @@ struct MediaDetailView: View {
 
             canonicalSection(details.resolvedMetadata)
             
-            // Watch button (for movies)
-            if details.kind == .movie {
+            // Watch button (for directly-playable content: movies, videos, episodes, tracks)
+            if details.kind == .movie || details.kind == .video || details.kind == .episode || details.kind == .track {
                 Button {
-                    selectedItem = item
-                    showingStreams = true
+                    if isYouTube {
+                        playingYouTube = PlayableYouTube(id: item.id)
+                    } else {
+                        selectedItem = item
+                        showingStreams = true
+                    }
                 } label: {
                     Label("Watch Now", systemImage: "play.fill")
                         .frame(maxWidth: .infinity)
@@ -146,8 +166,35 @@ struct MediaDetailView: View {
             if let episodes = details.episodes, !episodes.isEmpty {
                 episodesList(episodes)
             }
+
+            relatedSection
         }
         .padding(.vertical)
+    }
+
+    /// "More Like This" — semantic-similarity related content (Phase 5/9).
+    @ViewBuilder
+    private var relatedSection: some View {
+        if !related.isEmpty {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("More Like This")
+                    .font(.headline)
+                    .padding(.horizontal)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(alignment: .top, spacing: 14) {
+                        ForEach(related) { entry in
+                            NavigationLink {
+                                MediaDetailView(connectorId: entry.extensionID, item: entry.item)
+                            } label: {
+                                PosterCard(title: entry.item.title, artworkURL: entry.item.artworkUrl)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.horizontal)
+                }
+            }
+        }
     }
     
     private func episodesList(_ episodes: [CatalogItem]) -> some View {
@@ -259,9 +306,24 @@ struct MediaDetailView: View {
                     Label(collection.title, systemImage: saved ? "checkmark" : collection.systemImage)
                 }
             }
+            Divider()
+            Button {
+                WatchQueue(context: context).toggle(item, extensionID: connectorId)
+            } label: {
+                let queued = WatchQueue(context: context).contains(item, extensionID: connectorId)
+                Label(queued ? "Remove from Up Next" : "Add to Up Next",
+                      systemImage: queued ? "checkmark" : "text.badge.plus")
+            }
         } label: {
             Image(systemName: "plus.circle")
         }
+    }
+
+    /// Ingest the browsed item into the Content Graph (Phase 3) and record the
+    /// view on the Activity timeline (Phase 4).
+    private func recordView() {
+        ContentGraph(context: context).ingest(item, extensionID: connectorId)
+        SwiftDataActivityRecorder(context: context).record(.content(.view, extensionID: connectorId, item: item))
     }
 
     private func loadDetails() async {
@@ -269,7 +331,7 @@ struct MediaDetailView: View {
         error = nil
         
         do {
-            details = try await RuntimeEngine.shared.details(connectorId, itemId: item.id)
+            details = try await MediaCatalog.shared.details(connectorId, itemId: item.id)
         } catch let err as ConnectorError {
             error = err
         } catch let other {

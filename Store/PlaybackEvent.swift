@@ -67,6 +67,8 @@ final class PlaybackEvent {
     var positionSeconds: Double
     var durationSeconds: Double
     var timestamp: Date
+    /// Owning user profile (Phase 6).
+    var profileID: String = UserProfile.defaultProfileID
 
     init(
         id: UUID = UUID(),
@@ -77,6 +79,7 @@ final class PlaybackEvent {
         kind: String,
         positionSeconds: Double,
         durationSeconds: Double,
+        profileID: String = UserProfile.defaultProfileID,
         timestamp: Date = .now
     ) {
         self.id = id
@@ -87,10 +90,11 @@ final class PlaybackEvent {
         self.kind = kind
         self.positionSeconds = positionSeconds
         self.durationSeconds = durationSeconds
+        self.profileID = profileID
         self.timestamp = timestamp
     }
 
-    convenience init(input: PlaybackEventInput) {
+    convenience init(input: PlaybackEventInput, profileID: String = UserProfile.defaultProfileID) {
         self.init(
             type: input.type,
             extensionID: input.extensionID,
@@ -99,6 +103,7 @@ final class PlaybackEvent {
             kind: input.kind,
             positionSeconds: input.positionSeconds,
             durationSeconds: input.durationSeconds,
+            profileID: profileID,
             timestamp: input.timestamp
         )
     }

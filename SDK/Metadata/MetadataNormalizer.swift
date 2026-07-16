@@ -151,6 +151,19 @@ public nonisolated enum GenreVocabulary {
         return titleCased(raw)
     }
 
+    /// The set of canonical genre names this vocabulary knows about.
+    public static var allCanonical: Set<String> { Set(synonyms.values) }
+
+    /// Canonical genres mentioned anywhere in free text (phrase-matched against
+    /// both synonyms and canonical names). Deterministic: results are sorted.
+    public static func detected(in text: String) -> [String] {
+        let lower = text.lowercased()
+        var found = Set<String>()
+        for (synonym, canonical) in synonyms where lower.contains(synonym) { found.insert(canonical) }
+        for canonical in allCanonical where lower.contains(canonical.lowercased()) { found.insert(canonical) }
+        return found.sorted()
+    }
+
     private static func titleCased(_ text: String) -> String {
         text.trimmingCharacters(in: .whitespaces)
             .split(separator: " ")

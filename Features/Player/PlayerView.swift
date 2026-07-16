@@ -29,6 +29,8 @@ final class PlayerModel {
 
     // Playback Event Engine wiring.
     private var recorder: PlaybackEventRecording?
+    // Activity Graph wiring (Phase 4) — the coarse, cross-domain timeline.
+    private var activityRecorder: ActivityRecording?
     private var statusObservation: NSKeyValueObservation?
     private var endObserver: NSObjectProtocol?
     private var hasStarted = false
@@ -47,6 +49,7 @@ final class PlayerModel {
     func start(context: ModelContext) {
         modelContext = context
         recorder = SwiftDataPlaybackEventRecorder(context: context)
+        activityRecorder = SwiftDataActivityRecorder(context: context)
         try? AVAudioSession.sharedInstance().setCategory(.playback)
         try? AVAudioSession.sharedInstance().setActive(true)
 
@@ -168,19 +171,29 @@ final class PlayerModel {
     private func emit(_ type: PlaybackEventType) {
         let position = player.currentTime().seconds
         let duration = player.currentItem?.duration.seconds ?? 0
+        let safePosition = position.isFinite ? position : 0
+        let safeDuration = duration.isFinite ? duration : 0
         recorder?.record(PlaybackEventInput(
             type: type,
             extensionID: extensionID,
             itemID: item.id,
             title: item.title,
             kind: item.kind.rawValue,
-            positionSeconds: position.isFinite ? position : 0,
-            durationSeconds: duration.isFinite ? duration : 0
+            positionSeconds: safePosition,
+            durationSeconds: safeDuration
         ))
+        // Mirror the significant transitions onto the activity timeline. Seek
+        // noise (skipped/replayed) stays in the fine-grained playback engine only.
+        if let action = type.activityAction {
+            activityRecorder?.record(.content(
+                action, extensionID: extensionID, item: item,
+                positionSeconds: safePosition, durationSeconds: safeDuration
+            ))
+        }
     }
 
     private func savedPosition(context: ModelContext) -> Double {
-        let key = "\(extensionID)|\(item.id)"
+        let key = "\(ProfileManager.shared.currentProfileID)|\(extensionID)|\(item.id)"
         let descriptor = FetchDescriptor<HistoryEntry>(predicate: #Predicate { $0.key == key })
         return (try? context.fetch(descriptor).first)?.positionSeconds ?? 0
     }

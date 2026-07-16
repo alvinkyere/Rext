@@ -11,8 +11,14 @@ import SwiftData
 // ---------------------------------------------------------------------------
 
 struct ExtensionsView: View {
+    @Environment(\.modelContext) private var context
     @Query(sort: \RepositorySource.addedAt) private var repositories: [RepositorySource]
     @State private var controller = ExtensionsController()
+    @State private var accounts: AccountsController?
+
+    private func connectionState(_ id: String) -> ProviderConnectionState? {
+        accounts?.accounts.first { $0.extensionID == id }?.state
+    }
 
     var body: some View {
         NavigationStack {
@@ -22,6 +28,19 @@ struct ExtensionsView: View {
                         Label(error, systemImage: "exclamationmark.triangle.fill")
                             .foregroundStyle(.orange)
                             .font(.footnote)
+                    }
+                }
+
+                Section {
+                    NavigationLink {
+                        ProviderCatalogView(controller: controller)
+                    } label: {
+                        Label("Browse Providers by Category", systemImage: "square.grid.2x2.fill")
+                    }
+                    NavigationLink {
+                        AccountsView()
+                    } label: {
+                        Label("Accounts", systemImage: "person.crop.circle")
                     }
                 }
 
@@ -57,7 +76,7 @@ struct ExtensionsView: View {
                     }
                 }
             }
-            .navigationTitle("Extensions")
+            .navigationTitle("Providers")
             .overlay { if controller.isBusy { ProgressView().controlSize(.large) } }
             .refreshable { await reload() }
             .task { await reload() }
@@ -77,6 +96,8 @@ struct ExtensionsView: View {
     private func reload() async {
         let refs = repositories.filter(\.isEnabled).map { RepoRef(url: $0.url, title: $0.title) }
         await controller.refresh(repositories: refs)
+        if accounts == nil { accounts = AccountsController(context: context) }
+        await accounts?.reload()
     }
 
     private func availableRow(_ entry: ExtensionsController.Entry) -> some View {
@@ -110,7 +131,11 @@ struct ExtensionsView: View {
                     .font(.caption2).foregroundStyle(.tertiary)
             }
             Spacer()
-            Text("Installed").font(.caption).foregroundStyle(.blue)
+            if let state = connectionState(ext.id) {
+                ConnectionBadge(state: state)
+            } else {
+                Text("Installed").font(.caption).foregroundStyle(.blue)
+            }
         }
         .padding(.vertical, 2)
     }

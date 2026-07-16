@@ -19,39 +19,50 @@ protocol PlaybackEventRecording {
 @MainActor
 final class SwiftDataPlaybackEventRecorder: PlaybackEventRecording {
     private let context: ModelContext
+    /// nil = stamp the active profile at record time.
+    private let profileID: String?
 
-    init(context: ModelContext) {
+    init(context: ModelContext, profileID: String? = nil) {
         self.context = context
+        self.profileID = profileID
     }
 
     func record(_ input: PlaybackEventInput) {
-        context.insert(PlaybackEvent(input: input))
+        let profileID = self.profileID ?? ProfileManager.shared.currentProfileID
+        context.insert(PlaybackEvent(input: input, profileID: profileID))
     }
 }
 
-/// Read-side queries over recorded events — the foundation the Recommendation
-/// Engine and Smart Collections (Phase 2) will consume.
+/// Read-side queries over recorded events, scoped to one profile (Phase 6) — the
+/// foundation the Recommendation Engine and Smart Collections consume.
 @MainActor
 struct PlaybackEventStore {
     let context: ModelContext
+    /// nil = the active profile (resolved lazily so this stays off the property initializer).
+    var profileID: String?
+    private var resolvedProfileID: String { profileID ?? ProfileManager.shared.currentProfileID }
 
     func allEvents() -> [PlaybackEvent] {
-        (try? context.fetch(FetchDescriptor<PlaybackEvent>(
+        let profileID = resolvedProfileID
+        return (try? context.fetch(FetchDescriptor<PlaybackEvent>(
+            predicate: #Predicate { $0.profileID == profileID },
             sortBy: [SortDescriptor(\.timestamp, order: .forward)]
         ))) ?? []
     }
 
     func events(itemID: String) -> [PlaybackEvent] {
-        (try? context.fetch(FetchDescriptor<PlaybackEvent>(
-            predicate: #Predicate { $0.itemID == itemID },
+        let profileID = resolvedProfileID
+        return (try? context.fetch(FetchDescriptor<PlaybackEvent>(
+            predicate: #Predicate { $0.itemID == itemID && $0.profileID == profileID },
             sortBy: [SortDescriptor(\.timestamp, order: .forward)]
         ))) ?? []
     }
 
     func count(of type: PlaybackEventType) -> Int {
         let raw = type.rawValue
+        let profileID = resolvedProfileID
         return (try? context.fetchCount(FetchDescriptor<PlaybackEvent>(
-            predicate: #Predicate { $0.typeRaw == raw }
+            predicate: #Predicate { $0.typeRaw == raw && $0.profileID == profileID }
         ))) ?? 0
     }
 

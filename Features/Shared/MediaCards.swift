@@ -19,50 +19,71 @@ extension CatalogItem {
         self.init(id: history.itemID, title: history.title, subtitle: nil,
                   artworkUrl: history.artworkURL, kind: history.contentKind, metadata: nil)
     }
+
+    init(trending: TrendingItem) {
+        self.init(id: trending.itemID, title: trending.title, subtitle: nil,
+                  artworkUrl: nil, kind: trending.kind, metadata: nil)
+    }
+
+    init(queue: QueueItem) {
+        self.init(id: queue.itemID, title: queue.title, subtitle: queue.subtitle,
+                  artworkUrl: queue.artworkURL, kind: queue.contentKind, metadata: nil)
+    }
+}
+
+enum PosterSize {
+    case regular, large
+    var width: CGFloat { self == .large ? 150 : 120 }
+    var height: CGFloat { self == .large ? 212 : 170 }
 }
 
 struct PosterCard: View {
     let title: String
     let artworkURL: String?
+    var subtitle: String?
     var progress: Double?
+    var size: PosterSize = .regular
 
-    init(title: String, artworkURL: String?, progress: Double? = nil) {
+    init(title: String, artworkURL: String?, subtitle: String? = nil, progress: Double? = nil, size: PosterSize = .regular) {
         self.title = title
         self.artworkURL = artworkURL
+        self.subtitle = subtitle
         self.progress = progress
+        self.size = size
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             ZStack(alignment: .bottom) {
-                AsyncImage(url: artworkURL.flatMap(URL.init)) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image.resizable().aspectRatio(contentMode: .fill)
-                    case .empty:
-                        Rectangle().fill(Color.gray.opacity(0.25)).overlay { ProgressView() }
-                    default:
-                        Rectangle().fill(Color.gray.opacity(0.25))
-                            .overlay { Image(systemName: "photo").foregroundStyle(.secondary) }
-                    }
-                }
-                .frame(width: 120, height: 170)
-                .clipped()
+                Artwork(url: artworkURL, title: title)
+                    .frame(width: size.width, height: size.height)
 
                 if let progress, progress > 0 {
-                    ProgressView(value: progress)
-                        .tint(.blue)
-                        .padding(.horizontal, 8)
-                        .padding(.bottom, 6)
+                    ZStack(alignment: .bottom) {
+                        LinearGradient(colors: [.clear, .black.opacity(0.5)], startPoint: .center, endPoint: .bottom)
+                        ProgressView(value: progress)
+                            .tint(.white)
+                            .padding(.horizontal, 8)
+                            .padding(.bottom, 6)
+                    }
                 }
             }
-            .frame(width: 120, height: 170)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .frame(width: size.width, height: size.height)
+            .clipShape(RoundedRectangle(cornerRadius: Theme.cardCorner))
+            .shadow(color: .black.opacity(0.35), radius: 6, y: 3)
 
             Text(title)
-                .font(.caption)
-                .lineLimit(2)
-                .frame(width: 120, alignment: .leading)
+                .font(.caption.weight(.medium))
+                .lineLimit(1)
+                .frame(width: size.width, alignment: .leading)
+
+            if let subtitle {
+                Text(subtitle)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .frame(width: size.width, alignment: .leading)
+            }
         }
     }
 }

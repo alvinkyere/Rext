@@ -2,124 +2,176 @@ import SwiftUI
 import SwiftData
 
 // ---------------------------------------------------------------------------
-// HomeView.swift  (Rext Phase 2 — Priority 4: Home dashboard)
+// HomeView.swift  (Rext dynamic feed — premium redesign)
 //
-// Opens the app to a dashboard rather than a search bar. Sections are backed by
-// real data: Continue (in-progress history), Recently Added (library), Installed
-// Extensions, and Recent Activity (structured logs). Sections with no data hide
-// themselves, so the dashboard fills in as the user uses the app.
+// A premium, Apple-TV/Music-grade home: a featured spotlight up top, then rich
+// horizontal rails built dynamically by HomeFeedBuilder (Continue, Up Next,
+// Trending, affinity collections, Recently Added) with network-backed
+// recommendations layered in. Large artwork, gradient backdrop, graceful empty
+// state. Everything is data-driven from the platform services and reactive to
+// the active profile.
 // ---------------------------------------------------------------------------
 
 struct HomeView: View {
-    @Query(sort: \HistoryEntry.lastAccessed, order: .reverse) private var history: [HistoryEntry]
-    @Query(sort: \LibraryItem.addedAt, order: .reverse) private var library: [LibraryItem]
+    @Query private var history: [HistoryEntry]
+    @Query private var library: [LibraryItem]
+    @Query private var queue: [QueueItem]
+
+    @Environment(\.modelContext) private var modelContext
+    @Environment(ProfileManager.self) private var profiles
 
     @State private var installed: [InstalledExtension] = []
-    @State private var activity: [LogEvent] = []
+    @State private var recommendations: [Recommendation] = []
+    @State private var showingSwitcher = false
 
-    private var continueItems: [HistoryEntry] { history.filter(\.isInProgress) }
+    private var feed: [HomeSection] {
+        HomeFeedBuilder(context: modelContext, profileID: profiles.currentProfileID).build()
+    }
+
+    /// The top pick for the featured spotlight: best recommendation, else the
+    /// first item of the first available rail.
+    private var featured: (extensionID: String, item: CatalogItem, tagline: String?)? {
+        if let rec = recommendations.first {
+            return (rec.extensionID, rec.item, rec.reason.headline)
+        }
+        if let section = feed.first, let entry = section.items.first {
+            return (entry.extensionID, entry.item, section.title)
+        }
+        return nil
+    }
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
-                    hero
-
-                    if !continueItems.isEmpty {
-                        rail("Continue") {
-                            ForEach(continueItems) { entry in
-                                NavigationLink {
-                                    MediaDetailView(connectorId: entry.extensionID, item: CatalogItem(history: entry))
-                                } label: {
-                                    PosterCard(title: entry.title, artworkURL: entry.artworkURL, progress: entry.progress)
-                                }
-                                .buttonStyle(.plain)
+            ZStack {
+                RextBackground()
+                ScrollView {
+                    VStack(alignment: .leading, spacing: Theme.sectionSpacing) {
+                        if let featured {
+                            NavigationLink {
+                                MediaDetailView(connectorId: featured.extensionID, item: featured.item)
+                            } label: {
+                                FeaturedSpotlight(title: featured.item.title, subtitle: featured.tagline,
+                                                  artworkURL: featured.item.artworkUrl)
                             }
+                            .buttonStyle(.plain)
                         }
-                    }
 
-                    if !library.isEmpty {
-                        rail("Recently Added") {
-                            ForEach(library.prefix(12)) { item in
-                                NavigationLink {
-                                    MediaDetailView(connectorId: item.extensionID, item: CatalogItem(library: item))
-                                } label: {
-                                    PosterCard(title: item.title, artworkURL: item.artworkURL)
-                                }
-                                .buttonStyle(.plain)
-                            }
+                        if feed.isEmpty && recommendations.isEmpty {
+                            emptyFeed
                         }
-                    }
 
-                    installedSection
-                    activitySection
+                        if let continueSection = feed.first(where: { $0.id == "continue" }) {
+                            rail(continueSection.title, subtitle: nil, items: continueSection.items, size: .large)
+                        }
+
+                        if !recommendations.isEmpty {
+                            recommendedRail
+                        }
+
+                        ForEach(feed.filter { $0.id != "continue" }) { section in
+                            rail(section.title, subtitle: section.subtitle, items: section.items)
+                        }
+
+                        installedSection
+                    }
+                    .padding(.vertical)
                 }
-                .padding(.vertical)
             }
             .navigationTitle("Home")
-            .task {
-                installed = await RuntimeEngine.shared.installedExtensions
-                activity = LogBus.shared.history(limit: 20)
-            }
-        }
-    }
-
-    private var hero: some View {
-        RoundedRectangle(cornerRadius: 20)
-            .fill(LinearGradient(colors: [.blue, .purple], startPoint: .topLeading, endPoint: .bottomTrailing))
-            .frame(height: 150)
-            .overlay(alignment: .bottomLeading) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Rext").font(.largeTitle.bold()).foregroundStyle(.white)
-                    Text("Your extensions, your content.").font(.subheadline).foregroundStyle(.white.opacity(0.85))
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    if let current = profiles.current {
+                        Button { showingSwitcher = true } label: {
+                            ProfileAvatarView(profile: current, size: 30)
+                        }
+                        .accessibilityLabel("Switch profile")
+                    }
                 }
-                .padding()
             }
-            .padding(.horizontal)
-    }
-
-    private func rail<Content: View>(_ title: String, @ViewBuilder _ content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(title).font(.title3.bold()).padding(.horizontal)
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(alignment: .top, spacing: 14) { content() }.padding(.horizontal)
+            .sheet(isPresented: $showingSwitcher) {
+                ProfileSwitcher().environment(profiles)
+            }
+            .task(id: profiles.currentProfileID) {
+                installed = await RuntimeEngine.shared.installedExtensions
+                recommendations = await RecommendationService(context: modelContext).recommendations()
             }
         }
+    }
+
+    // MARK: - Rails
+
+    private func rail(_ title: String, subtitle: String?, items: [HomeFeedItem], size: PosterSize = .regular) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            RailHeader(title: title, subtitle: subtitle)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .top, spacing: Theme.railSpacing) {
+                    ForEach(items) { entry in
+                        NavigationLink {
+                            MediaDetailView(connectorId: entry.extensionID, item: entry.item)
+                        } label: {
+                            PosterCard(title: entry.item.title, artworkURL: entry.item.artworkUrl,
+                                       subtitle: entry.item.subtitle, progress: entry.progress, size: size)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal)
+            }
+        }
+    }
+
+    private var recommendedRail: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            RailHeader(title: "Recommended for You", subtitle: "Because of what you watch")
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .top, spacing: Theme.railSpacing) {
+                    ForEach(recommendations) { rec in
+                        NavigationLink {
+                            MediaDetailView(connectorId: rec.extensionID, item: rec.item)
+                        } label: {
+                            PosterCard(title: rec.item.title, artworkURL: rec.item.artworkUrl,
+                                       subtitle: rec.reason.headline, size: .large)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal)
+            }
+        }
+    }
+
+    // MARK: - Empty & installed
+
+    private var emptyFeed: some View {
+        ContentUnavailableView {
+            Label("Nothing here yet", systemImage: "sparkles.tv")
+        } description: {
+            Text("Connect a provider and start watching — your Home fills in with what you're into.")
+        } actions: {
+            NavigationLink { ExtensionsView() } label: { Text("Browse Providers") }
+                .buttonStyle(.borderedProminent)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 40)
     }
 
     private var installedSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Installed Extensions").font(.title3.bold()).padding(.horizontal)
-            if installed.isEmpty {
-                Text("No extensions installed yet.").font(.subheadline).foregroundStyle(.secondary).padding(.horizontal)
-            } else {
-                ForEach(installed) { ext in
+            if !installed.isEmpty {
+                RailHeader(title: "Your Providers", subtitle: nil)
+                ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 12) {
-                        RoundedRectangle(cornerRadius: 8).fill(.blue.gradient).frame(width: 36, height: 36)
-                            .overlay { Image(systemName: "puzzlepiece.extension.fill").font(.caption).foregroundStyle(.white) }
-                        VStack(alignment: .leading) {
-                            Text(ext.manifest.displayName).font(.subheadline)
-                            Text("v\(ext.manifest.version.description)").font(.caption).foregroundStyle(.secondary)
+                        ForEach(installed) { ext in
+                            VStack(spacing: 8) {
+                                RoundedRectangle(cornerRadius: 16)
+                                    .fill(brandGradient(for: ext.manifest.displayName))
+                                    .frame(width: 64, height: 64)
+                                    .overlay { Image(systemName: "puzzlepiece.extension.fill").foregroundStyle(.white) }
+                                Text(ext.manifest.displayName).font(.caption2).lineLimit(1).frame(width: 72)
+                            }
                         }
-                        Spacer()
                     }
                     .padding(.horizontal)
-                }
-            }
-        }
-    }
-
-    private var activitySection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if !activity.isEmpty {
-                Text("Recent Activity").font(.title3.bold()).padding(.horizontal)
-                ForEach(activity.suffix(8).reversed()) { event in
-                    Text("· \(event.message)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal)
                 }
             }
         }

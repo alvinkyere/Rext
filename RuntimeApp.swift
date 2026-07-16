@@ -13,7 +13,8 @@ struct RuntimeApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .environment(ProfileManager.shared)
         }
-        .modelContainer(for: [RepositorySource.self, LibraryItem.self, HistoryEntry.self, PlaybackEvent.self])
+        .modelContainer(for: [RepositorySource.self, LibraryItem.self, HistoryEntry.self, PlaybackEvent.self, ContentNode.self, ActivityEvent.self, UserProfile.self, QueueItem.self, ProviderAccount.self])
     }
 }

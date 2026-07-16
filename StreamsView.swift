@@ -40,8 +40,16 @@ struct StreamsView: View {
                 }
             }
             .task { await loadStreams() }
-            .sheet(item: $playingStream) { stream in
-                PlayerView(streams: streams, initial: stream, item: item, extensionID: connectorId, title: title)
+            .fullScreenCover(item: $playingStream) { stream in
+                if stream.format == "youtube" {
+                    #if canImport(WebKit) && canImport(UIKit)
+                    RextVideoPlayerView(item: item, extensionID: connectorId, title: title)
+                    #else
+                    PlayerView(streams: streams, initial: stream, item: item, extensionID: connectorId, title: title)
+                    #endif
+                } else {
+                    PlayerView(streams: streams, initial: stream, item: item, extensionID: connectorId, title: title)
+                }
             }
         }
     }
@@ -82,7 +90,7 @@ struct StreamsView: View {
         do {
             let episodeId = item.kind == .episode ? item.id : nil
             let parentId = item.kind == .episode ? (item.metadata?["parentId"].flatMap(stringValue) ?? item.id) : item.id
-            streams = try await RuntimeEngine.shared.streams(connectorId, itemId: parentId, episodeId: episodeId)
+            streams = try await MediaCatalog.shared.streams(connectorId, itemId: parentId, episodeId: episodeId)
         } catch let err as ConnectorError {
             error = err
         } catch let other {

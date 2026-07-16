@@ -12,10 +12,19 @@ import SwiftData
 struct LibraryView: View {
     @Query(sort: \LibraryItem.addedAt, order: .reverse) private var items: [LibraryItem]
     @Query(sort: \HistoryEntry.lastAccessed, order: .reverse) private var history: [HistoryEntry]
+    @Query(sort: \QueueItem.position, order: .forward) private var queue: [QueueItem]
+    @Environment(ProfileManager.self) private var profiles
+    @Environment(\.modelContext) private var context
+
+    // Rows are scoped to the active profile (Phase 6).
+    private var scopedItems: [LibraryItem] { items.filter { $0.profileID == profiles.currentProfileID } }
+    private var scopedHistory: [HistoryEntry] { history.filter { $0.profileID == profiles.currentProfileID } }
+    private var scopedQueue: [QueueItem] { queue.filter { $0.profileID == profiles.currentProfileID } }
 
     private enum Segment: Hashable {
         case collection(LibraryCollection)
         case history
+        case queue
     }
 
     @State private var selection: Segment = .collection(.favorites)
@@ -35,6 +44,7 @@ struct LibraryView: View {
     private var chips: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
+                chip(title: "Up Next", systemImage: "text.badge.plus", segment: .queue)
                 ForEach(LibraryCollection.allCases, id: \.self) { collection in
                     chip(title: collection.title, systemImage: collection.systemImage, segment: .collection(collection))
                 }
@@ -64,7 +74,7 @@ struct LibraryView: View {
     private var content: some View {
         switch selection {
         case .collection(let collection):
-            let shown = items.filter { $0.collectionRaw == collection.rawValue }
+            let shown = scopedItems.filter { $0.collectionRaw == collection.rawValue }
             if shown.isEmpty {
                 emptyState(collection.title)
             } else {
@@ -80,11 +90,11 @@ struct LibraryView: View {
                 }
             }
         case .history:
-            if history.isEmpty {
+            if scopedHistory.isEmpty {
                 emptyState("History")
             } else {
                 grid {
-                    ForEach(history) { entry in
+                    ForEach(scopedHistory) { entry in
                         NavigationLink {
                             MediaDetailView(connectorId: entry.extensionID, item: CatalogItem(history: entry))
                         } label: {
@@ -94,6 +104,45 @@ struct LibraryView: View {
                     }
                 }
             }
+        case .queue:
+            queueList
+        }
+    }
+
+    /// The reorderable, deletable watch queue (Phase 9).
+    @ViewBuilder
+    private var queueList: some View {
+        if scopedQueue.isEmpty {
+            emptyState("Up Next")
+        } else {
+            List {
+                ForEach(scopedQueue) { entry in
+                    NavigationLink {
+                        MediaDetailView(connectorId: entry.extensionID, item: CatalogItem(queue: entry))
+                    } label: {
+                        HStack(spacing: 12) {
+                            PosterCard(title: entry.title, artworkURL: entry.artworkURL)
+                                .frame(width: 60)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(entry.title).font(.subheadline).lineLimit(2)
+                                if let subtitle = entry.subtitle {
+                                    Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                }
+                            }
+                        }
+                    }
+                }
+                .onDelete { offsets in
+                    let queue = scopedQueue
+                    let store = WatchQueue(context: context, profileID: profiles.currentProfileID)
+                    for index in offsets { store.remove(queue[index]) }
+                }
+                .onMove { source, destination in
+                    WatchQueue(context: context, profileID: profiles.currentProfileID).move(from: source, to: destination)
+                }
+            }
+            .listStyle(.plain)
+            .toolbar { EditButton() }
         }
     }
 
